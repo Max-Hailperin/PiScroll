@@ -1,7 +1,8 @@
 package edu.gac.mcs.max.piscroll;
 
-import android.app.Activity;
 import android.os.Bundle;
+import android.os.Handler;
+import android.support.annotation.NonNull;
 import android.support.v4.app.Fragment;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
@@ -23,24 +24,27 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Created by Max Hailperin max@gustavus.edu on 3/12/16.
+ * Known limitation: when the app is left with the back button and restarted, it starts over.
  */
 public class PiScrollFragment extends Fragment {
 
-    public static final String KEY_LAYOUT_STATE = "layout_state";
     private RecyclerView mRecyclerView;
     private LinearLayoutManager mLayoutManager;
     private TextAdapter mAdapter;
     private boolean mIsAutoScrolling;
+    private Handler mHandler;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setRetainInstance(true);
         setHasOptionsMenu(true);
+        mHandler = new Handler();
     }
 
     @Override
-    public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
+    public View onCreateView(LayoutInflater inflater, ViewGroup container,
+                             Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_pi_scroll, container, false);
 
         mRecyclerView = (RecyclerView) view.findViewById(R.id.text_recycler_view);
@@ -89,28 +93,10 @@ public class PiScrollFragment extends Fragment {
                 }
 
                 @Override
-                public void write(char[] buf, int offset, int count) throws IOException {
+                public void write(@NonNull char[] buf, int offset, int count) throws IOException {
                     mAdapter.awaitDemand();
                     final String s = new String(buf, offset, count);
-                    Activity a;
-                    // This loop is an attempt to reduce the likelihood of trouble from
-                    // output occurring while the activity is being restarted. Without this loop,
-                    // there was every once in a while a NullPointerException when rotating the
-                    // device, particularly if auto-scroll was on. Now there will definitely be
-                    // no NullPointerException, but the Activity could be the old one. I'm not
-                    // sure what that will do. I really don't know how to properly synchronize this.
-                    while (true) {
-                        a = getActivity();
-                        if (a != null) {
-                            break;
-                        }
-                        try {
-                            Thread.sleep(1);
-                        } catch (InterruptedException e) {
-                            Log.e("PiScroll", "unexpected interruption", e);
-                        }
-                    }
-                    a.runOnUiThread(new Runnable() {
+                    mHandler.post(new Runnable() {
                         @Override
                         public void run() {
                             mAdapter.append(s);
@@ -123,15 +109,19 @@ public class PiScrollFragment extends Fragment {
 
         mRecyclerView.setAdapter(mAdapter);
 
-        autoScrollIfEnabled();
+        mRecyclerView.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override
+            public void onViewAttachedToWindow(View v) {
+                autoScrollIfEnabled();
+            }
+
+            @Override
+            public void onViewDetachedFromWindow(View v) {
+
+            }
+        });
 
         return view;
-    }
-
-    private void autoScrollIfEnabled() {
-        if (mIsAutoScrolling) {
-            mRecyclerView.smoothScrollToPosition(mAdapter.getItemCount() - 1);
-        }
     }
 
     @Override
@@ -169,6 +159,12 @@ public class PiScrollFragment extends Fragment {
     private void autoScrollOff() {
         mIsAutoScrolling = false;
         getActivity().invalidateOptionsMenu();
+    }
+
+    private void autoScrollIfEnabled() {
+        if (mIsAutoScrolling && mRecyclerView.isAttachedToWindow()) {
+            mRecyclerView.smoothScrollToPosition(mAdapter.getItemCount() - 1);
+        }
     }
 
     private class TextHolder extends RecyclerView.ViewHolder {
