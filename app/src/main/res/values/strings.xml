@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">PiScroll</string>
+    <string name="title_format">π (%1$d through %2$d)</string>
+    <string name="manual_scroll">Manual Scroll</string>
+    <string name="auto_scroll">Auto Scroll</string>
+    <string name="rewind">Start Over</string>
+</resources>
