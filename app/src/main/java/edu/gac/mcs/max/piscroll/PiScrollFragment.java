@@ -68,7 +68,7 @@ public class PiScrollFragment extends Fragment {
         });
 
         mRecyclerView.setOnTouchListener(new View.OnTouchListener() {
-            // As a stanadard UI feature, touching the RecyclerView stops any scroll that is in
+            // As a standard UI feature, touching the RecyclerView stops any scroll that is in
             // progress (from a fling gesture, for example). Therefore, it seems to also make
             // sense to turn auto scrolling off (if it was on).
             @Override
