@@ -117,7 +117,7 @@ public class PiScrollFragment extends Fragment {
 
             @Override
             public void onViewDetachedFromWindow(View v) {
-
+                // do nothing
             }
         });
 
@@ -169,15 +169,15 @@ public class PiScrollFragment extends Fragment {
 
     private class TextHolder extends RecyclerView.ViewHolder {
 
-        private TextView mCharacterTextView;
+        private TextView mTextView;
 
         public TextHolder(View itemView) {
             super(itemView);
-            mCharacterTextView = (TextView) itemView;
+            mTextView = (TextView) itemView;
         }
 
         public void bindText(CharSequence text) {
-            mCharacterTextView.setText(text);
+            mTextView.setText(text);
         }
     }
 
@@ -185,7 +185,7 @@ public class PiScrollFragment extends Fragment {
 
         private StringBuilder mCharacters;
         private volatile int mItemCount;
-        private volatile int mLastBoundPosition;
+        private int mLastBoundPosition;
 
         public TextAdapter() {
             mCharacters = new StringBuilder();
@@ -228,9 +228,9 @@ public class PiScrollFragment extends Fragment {
 
         @Override
         public void onBindViewHolder(TextHolder holder, int position) {
-            mLastBoundPosition = position;
             try {
                 flowControl.lock();
+                mLastBoundPosition = position;
                 if (mItemCount - mLastBoundPosition < LOW_WATER) {
                     demand.signal();
                 }
@@ -246,10 +246,10 @@ public class PiScrollFragment extends Fragment {
         }
 
         public void append(CharSequence s) {
-            int oldLength = mCharacters.length();
+            int oldItemCount = mItemCount;
             mCharacters.append(s);
             mItemCount = mCharacters.length();
-            notifyItemRangeInserted(oldLength, s.length());
+            notifyItemRangeInserted(oldItemCount, mItemCount - oldItemCount);
         }
     }
 }
