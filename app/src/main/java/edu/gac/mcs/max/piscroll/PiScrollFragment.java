@@ -6,7 +6,6 @@ import android.support.annotation.NonNull;
 import android.support.v4.app.Fragment;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
-import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -18,9 +17,6 @@ import android.widget.TextView;
 
 import java.io.IOException;
 import java.io.Writer;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Created by Max Hailperin max@gustavus.edu on 3/12/16.
@@ -30,16 +26,14 @@ public class PiScrollFragment extends Fragment {
 
     private RecyclerView mRecyclerView;
     private LinearLayoutManager mLayoutManager;
-    private TextAdapter mAdapter;
+    private SpigotAdapter mAdapter;
     private boolean mIsAutoScrolling;
-    private Handler mHandler;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setRetainInstance(true);
         setHasOptionsMenu(true);
-        mHandler = new Handler();
     }
 
     @Override
@@ -68,7 +62,7 @@ public class PiScrollFragment extends Fragment {
         });
 
         mRecyclerView.setOnTouchListener(new View.OnTouchListener() {
-            // As a stanadard UI feature, touching the RecyclerView stops any scroll that is in
+            // As a standard UI feature, touching the RecyclerView stops any scroll that is in
             // progress (from a fling gesture, for example). Therefore, it seems to also make
             // sense to turn auto scrolling off (if it was on).
             @Override
@@ -79,34 +73,8 @@ public class PiScrollFragment extends Fragment {
         });
 
         if (mAdapter == null) {
-            mAdapter = new TextAdapter();
-
-            new Thread(new PiSpigot(new Writer() {
-                @Override
-                public void close() throws IOException {
-                    // do nothing
-                }
-
-                @Override
-                public void flush() throws IOException {
-                    // do nothing
-                }
-
-                @Override
-                public void write(@NonNull char[] buf, int offset, int count) throws IOException {
-                    mAdapter.awaitDemand();
-                    final String s = new String(buf, offset, count);
-                    mHandler.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            mAdapter.append(s);
-                            autoScrollIfEnabled();
-                        }
-                    });
-                }
-            })).start();
+            mAdapter = new SpigotAdapter(new PiSpigot());
         }
-
         mRecyclerView.setAdapter(mAdapter);
 
         mRecyclerView.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
@@ -181,14 +149,45 @@ public class PiScrollFragment extends Fragment {
         }
     }
 
-    private class TextAdapter extends RecyclerView.Adapter<TextHolder> {
+    private class SpigotAdapter extends RecyclerView.Adapter<TextHolder> {
 
+        private static final int INVENTORY_TARGET = 50; // characters generated ahead of binding
         private StringBuilder mCharacters;
-        private volatile int mItemCount;
         private int mLastBoundPosition;
+        private boolean mIsSpigotEnabled;
+        private final Handler mHandler;
+        private Runnable mRunSpigot;
 
-        public TextAdapter() {
+        public SpigotAdapter(final Spigot s) {
             mCharacters = new StringBuilder();
+            s.setWriter(new Writer() {
+                @Override
+                public void close() throws IOException {
+                    // do nothing
+                }
+
+                @Override
+                public void flush() throws IOException {
+                    // do nothing
+                }
+
+                @Override
+                public void write(@NonNull char[] buf, int offset, int count) throws IOException {
+                    mAdapter.append(new String(buf, offset, count));
+                    autoScrollIfEnabled();
+                }
+            });
+            mHandler = new Handler();
+            mRunSpigot = new Runnable() {
+                @Override
+                public void run() {
+                    if (mIsSpigotEnabled) {
+                        s.run();
+                        mHandler.post(this);
+                    }
+                }
+            };
+            updateSpigotEnablement();
         }
 
         @Override
@@ -198,58 +197,31 @@ public class PiScrollFragment extends Fragment {
             return new TextHolder(view);
         }
 
-        // Arrange for a reasonable range of additional characters to be in the TextAdapter
-        // beyond those that have been bound to TextHolders for display in the RecyclerView.
-        // Note that this design works because the RecyclerView limits how far ahead it creates
-        // and binds TextHolders. If it were really aggressive and bound everything the TextAdapter
-        // had available, then we'd have the makings of an infinite loop -- the process would keep
-        // running even without scrolling, generating more and more non-displayed characters.
-        // However, it isn't that aggressive. Rather, the scrolling limits the binding (with some
-        // margin) and the code here makes the binding in turn limit the production (with more
-        // margin), so the rate of scrolling ultimately throttles the rate of the whole process.
-        private static final int LOW_WATER = 50;
-        private static final int HIGH_WATER = 100;
-
-        private final Lock flowControl = new ReentrantLock();
-        private final Condition demand = flowControl.newCondition();
-
-        public void awaitDemand() { // meant to be called from another thread
-            try {
-                flowControl.lock();
-                while (mItemCount - mLastBoundPosition > HIGH_WATER) {
-                    demand.await();
-                }
-            } catch (InterruptedException e) {
-                Log.e("PiScroll", "unexpected interruption", e);
-            } finally {
-                flowControl.unlock();
-            }
-        }
-
         @Override
         public void onBindViewHolder(TextHolder holder, int position) {
-            try {
-                flowControl.lock();
-                mLastBoundPosition = position;
-                if (mItemCount - mLastBoundPosition < LOW_WATER) {
-                    demand.signal();
-                }
-            } finally {
-                flowControl.unlock();
-            }
+            mLastBoundPosition = position;
             holder.bindText(mCharacters.subSequence(position, position + 1));
+            updateSpigotEnablement();
+        }
+
+        private void updateSpigotEnablement() {
+            boolean old = mIsSpigotEnabled;
+            mIsSpigotEnabled = getItemCount() - mLastBoundPosition < INVENTORY_TARGET;
+            if (mIsSpigotEnabled && !old) {
+                mHandler.post(mRunSpigot);
+            }
         }
 
         @Override
         public int getItemCount() { // safe to call from other threads
-            return mItemCount;
+            return mCharacters.length();
         }
 
-        public void append(CharSequence s) {
-            int oldItemCount = mItemCount;
+        private void append(CharSequence s) {
+            int oldItemCount = getItemCount();
             mCharacters.append(s);
-            mItemCount = mCharacters.length();
-            notifyItemRangeInserted(oldItemCount, mItemCount - oldItemCount);
+            notifyItemRangeInserted(oldItemCount, getItemCount() - oldItemCount);
+            updateSpigotEnablement();
         }
     }
 }
