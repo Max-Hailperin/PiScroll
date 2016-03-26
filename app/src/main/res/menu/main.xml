@@ -6,7 +6,7 @@
     <item
         android:id="@+id/menu_item_rewind"
         android:title="@string/rewind"
-        android:icon="@drawable/ic_fast_rewind_24dp"
+        android:icon="@drawable/ic_home_24dp"
         app:showAsAction="ifRoom"
         />
 
